@@ -25,7 +25,7 @@
 #define INA219_DEFAULT_ADDRESS 0x40
 
 #define WIFI_AP_SSID "PLTA-Monitor"
-#define WIFI_AP_PASSWORD "AlphaBeta12a"
+#define WIFI_AP_PASSWORD "ChangeThisPassword"
 #define WIFI_AP_CHANNEL 1
 #define WIFI_AP_MAX_CONNECTIONS 4
 #define MDNS_HOSTNAME "plta-monitor"
