@@ -16,6 +16,10 @@ ESP32-S3 firmware and web dashboard for monitoring a DB-268 hydroelectric genera
 - RGB LED alarm states
 - ESP32 restart control
 - Free heap, Wi-Fi client, and firmware status
+- 10-minute reliability test with 2-minute interval records
+- Single CSV export for the reliability test
+- Three-point INA219 calibration comparison card
+- CSV export for multimeter calibration results
 - Gzip-compressed embedded web assets
 
 ## Repository Structure
@@ -30,6 +34,7 @@ ESP32S3Monitoring/
     style.h
     app.h
     web_assets_gz.h
+    oled_display.h
     preview/
       gen-gzip.js
       server.js
@@ -50,7 +55,7 @@ ESP32S3Monitoring/
 | Device | SDA | SCL |
 |---|---:|---:|
 | OLED | GPIO8 | GPIO9 |
-| INA219 | GPIO16 | GPIO17 |
+| INA219 | GPIO8 | GPIO9 |
 
 Verify all GPIO assignments against the exact ESP32-S3 board pinout.
 

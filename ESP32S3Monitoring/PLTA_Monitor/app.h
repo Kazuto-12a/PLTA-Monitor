@@ -4,13 +4,35 @@ const char app_js[] PROGMEM = R"rawliteral(
 const $ = (id) => document.getElementById(id);
 let inFlight = false;
 let refreshTimer = null;
-let refreshInterval = 1000;
+let refreshInterval = 250;
 let lastSuccessfulUpdate = 0;
 let dataMisses = 0;
 let sessionEnergyMWh = 0;
 let previousDataTime = 0;
 let isOffline = false;
 let endpointError = "";
+let statusSnapshot = {
+  oled_ok: false
+};
+let reliabilityStartTime = 0;
+let reliabilityRunning = false;
+const reliabilityRecords = [];
+const reliabilityTargets = [120, 240, 360, 480, 600];
+let latestLiveData = null;
+const calibrationRecords = [
+  { condition: "Rendah", multimeterVoltageV: null, multimeterCurrentMA: null,
+    inaVoltageV: null, inaCurrentMA: null, inaPowerMW: null,
+    multimeterPowerMW: null, voltageErrorPercent: null,
+    currentErrorPercent: null, powerErrorPercent: null, status: "Belum diuji" },
+  { condition: "Sedang", multimeterVoltageV: null, multimeterCurrentMA: null,
+    inaVoltageV: null, inaCurrentMA: null, inaPowerMW: null,
+    multimeterPowerMW: null, voltageErrorPercent: null,
+    currentErrorPercent: null, powerErrorPercent: null, status: "Belum diuji" },
+  { condition: "Penuh", multimeterVoltageV: null, multimeterCurrentMA: null,
+    inaVoltageV: null, inaCurrentMA: null, inaPowerMW: null,
+    multimeterPowerMW: null, voltageErrorPercent: null,
+    currentErrorPercent: null, powerErrorPercent: null, status: "Belum diuji" }
+];
 
 const historyLimit = 120;
 const history = [];
@@ -26,6 +48,124 @@ function formatUptime(milliseconds) {
   const minutes = String(Math.floor((seconds % 3600) / 60)).padStart(2, "0");
   const secs = String(seconds % 60).padStart(2, "0");
   return `${hours}:${minutes}:${secs}`;
+}
+
+function formatClock(totalSeconds) {
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  const minutes = String(Math.floor(seconds / 60)).padStart(2, "0");
+  const secs = String(seconds % 60).padStart(2, "0");
+  return `${minutes}:${secs}`;
+}
+
+function errorPercent(measured, reference) {
+  if (!Number.isFinite(measured) || !Number.isFinite(reference) ||
+      reference === 0) return null;
+  return Math.abs(measured - reference) / Math.abs(reference) * 100;
+}
+
+function saveCalibration(index) {
+  const voltageInput = $("calV" + index);
+  const currentInput = $("calI" + index);
+  const multimeterVoltageV = Number(voltageInput.value);
+  const multimeterCurrentMA = Number(currentInput.value);
+
+  if (!latestLiveData || !latestLiveData.sensor_ok) {
+    window.alert("Sensor INA219 belum memiliki pembacaan valid.");
+    return;
+  }
+  if (!Number.isFinite(multimeterVoltageV) ||
+      multimeterVoltageV <= 0 ||
+      !Number.isFinite(multimeterCurrentMA) ||
+      multimeterCurrentMA < 0) {
+    window.alert("Masukkan tegangan dan arus multimeter yang valid.");
+    return;
+  }
+
+  const inaVoltageV = Number(latestLiveData.voltage_v);
+  const inaCurrentMA = Number(latestLiveData.current_ma);
+  const inaPowerMW = inaVoltageV * inaCurrentMA;
+  const multimeterPowerMW =
+    multimeterVoltageV * multimeterCurrentMA;
+
+  const record = calibrationRecords[index];
+  record.multimeterVoltageV = multimeterVoltageV;
+  record.multimeterCurrentMA = multimeterCurrentMA;
+  record.inaVoltageV = inaVoltageV;
+  record.inaCurrentMA = inaCurrentMA;
+  record.inaPowerMW = inaPowerMW;
+  record.multimeterPowerMW = multimeterPowerMW;
+  record.voltageErrorPercent =
+    errorPercent(inaVoltageV, multimeterVoltageV);
+  record.currentErrorPercent =
+    errorPercent(inaCurrentMA, multimeterCurrentMA);
+  record.powerErrorPercent =
+    errorPercent(inaPowerMW, multimeterPowerMW);
+
+  const passed =
+    record.voltageErrorPercent !== null &&
+    record.voltageErrorPercent <= 5 &&
+    (record.currentErrorPercent === null ||
+      record.currentErrorPercent <= 5) &&
+    (record.powerErrorPercent === null ||
+      record.powerErrorPercent <= 5);
+  record.status = passed ? "Tercapai" : "Tidak Tercapai";
+
+  renderCalibration();
+}
+
+function formatPercent(value) {
+  return value === null ? "--" : value.toFixed(2) + "%";
+}
+
+function renderCalibration() {
+  calibrationRecords.forEach((record, index) => {
+    $("calIna" + index).textContent =
+      record.inaVoltageV === null
+        ? "-- V / -- mA"
+        : `${record.inaVoltageV.toFixed(2)} V / ${record.inaCurrentMA.toFixed(1)} mA`;
+    $("calErrV" + index).textContent =
+      formatPercent(record.voltageErrorPercent);
+    $("calErrI" + index).textContent =
+      formatPercent(record.currentErrorPercent);
+    $("calErrP" + index).textContent =
+      formatPercent(record.powerErrorPercent);
+
+    const button = document.querySelector(
+      `.save-calibration[data-index="${index}"]`
+    );
+    if (button) {
+      button.textContent =
+        record.status === "Belum diuji"
+          ? "Simpan Pengujian"
+          : record.status;
+      button.style.borderColor =
+        record.status === "Tercapai"
+          ? "#59d39a"
+          : record.status === "Tidak Tercapai"
+            ? "#ff7169"
+            : "";
+    }
+  });
+
+  const completed = calibrationRecords.filter((record) =>
+    record.status !== "Belum diuji"
+  );
+  const passed = completed.length > 0 &&
+    completed.every((record) => record.status === "Tercapai");
+
+  if (completed.length === 0) {
+    $("calibrationSummary").textContent = "Belum diuji";
+    $("calibrationSummary").style.color = "#91a1b1";
+  } else if (completed.length < 3) {
+    $("calibrationSummary").textContent =
+      `${completed.length} / 3 pengujian`;
+    $("calibrationSummary").style.color = "#f2b84b";
+  } else {
+    $("calibrationSummary").textContent =
+      passed ? "Tercapai" : "Tidak Tercapai";
+    $("calibrationSummary").style.color =
+      passed ? "#59d39a" : "#ff7169";
+  }
 }
 
 function updateDeviceStatus(data) {
@@ -77,6 +217,107 @@ function operatingState(data) {
   if (Number(data.power_mw) <= 0) return "No Load";
   if (Number(data.power_mw) < 100) return "Low Output";
   return "Generator Active";
+}
+
+function startReliabilityTest() {
+  reliabilityRecords.splice(0, reliabilityRecords.length);
+  reliabilityStartTime = Date.now();
+  reliabilityRunning = true;
+
+  $("reliabilityState").textContent = "Running";
+  $("reliabilityState").style.color = "#59d39a";
+  $("startReliability").disabled = true;
+  $("stopReliability").disabled = false;
+  $("exportReliability").disabled = true;
+  renderReliabilityRecords();
+  updateReliabilityTimer();
+}
+
+function stopReliabilityTest() {
+  reliabilityRunning = false;
+  $("reliabilityState").textContent =
+    reliabilityRecords.length === 5 ? "Complete" : "Stopped";
+  $("reliabilityState").style.color =
+    reliabilityRecords.length === 5 ? "#59d39a" : "#f2b84b";
+  $("startReliability").disabled = false;
+  $("stopReliability").disabled = true;
+  $("exportReliability").disabled = reliabilityRecords.length === 0;
+  updateReliabilityTimer();
+}
+
+function renderReliabilityRecords() {
+  const tbody = $("reliabilityRows");
+  if (reliabilityRecords.length === 0) {
+    tbody.innerHTML =
+      '<tr><td colspan="7" class="empty-row">No test records</td></tr>';
+  } else {
+    tbody.innerHTML = reliabilityRecords.map((record) => `
+      <tr>
+        <td>${record.minute} minute${record.minute === 1 ? "" : "s"}</td>
+        <td>${record.voltage.toFixed(2)} V</td>
+        <td>${record.current.toFixed(1)} mA</td>
+        <td>${record.power.toFixed(1)} mW</td>
+        <td>${record.sensor_ok ? "OK" : "ERROR"}</td>
+        <td>${record.wifi_connected ? "OK" : "DISCONNECTED"}</td>
+        <td>${record.oled_ok ? "OK" : "ERROR"}</td>
+      </tr>
+    `).join("");
+  }
+  $("reliabilityCount").textContent =
+    `${reliabilityRecords.length} / 5`;
+  $("exportReliability").disabled =
+    reliabilityRecords.length === 0 || reliabilityRunning;
+}
+
+function recordReliabilitySample(data, elapsedSeconds) {
+  const minute = reliabilityTargets.findIndex((seconds) =>
+    elapsedSeconds >= seconds
+  );
+  if (minute < 0) return;
+
+  const intervalMinute = reliabilityTargets[minute] / 60;
+  if (reliabilityRecords.some((record) =>
+    record.minute === intervalMinute
+  )) return;
+
+  reliabilityRecords.push({
+    minute: intervalMinute,
+    timestamp: new Date().toISOString(),
+    elapsed_seconds: reliabilityTargets[minute],
+    voltage: Number(data.voltage_v),
+    current: Number(data.current_ma),
+    power: Number(data.power_mw),
+    bus_voltage: Number(data.bus_voltage_v),
+    shunt_voltage: Number(data.shunt_voltage_mv),
+    sensor_ok: Boolean(data.sensor_ok),
+    wifi_connected: Boolean(data.wifi_connected),
+    oled_ok: Boolean(data.oled_ok),
+  });
+  reliabilityRecords.sort((a, b) => a.minute - b.minute);
+  renderReliabilityRecords();
+
+  if (reliabilityRecords.length === 5) {
+    stopReliabilityTest();
+  }
+}
+
+function updateReliabilityTimer() {
+  if (!reliabilityRunning) {
+    if (reliabilityRecords.length === 0) {
+      $("reliabilityElapsed").textContent = "00:00";
+      $("reliabilityNext").textContent = "02:00";
+    }
+    return;
+  }
+
+  const elapsed = (Date.now() - reliabilityStartTime) / 1000;
+  $("reliabilityElapsed").textContent = formatClock(Math.min(elapsed, 600));
+
+  const next = reliabilityTargets.find((seconds) =>
+    elapsed < seconds
+  );
+  $("reliabilityNext").textContent =
+    next ? formatClock(next) : "Complete";
 }
 
 function updateStats() {
@@ -185,6 +426,7 @@ async function refreshStatus() {
     if (!response.ok) throw new Error("HTTP " + response.status);
     const data = await response.json();
     updateDeviceStatus(data);
+    statusSnapshot = data;
 
     $("inaStatus").textContent = data.ina219_ok ? "Online" : "Error";
     $("inaStatus").style.color = data.ina219_ok ? "#59d39a" : "#ff7169";
@@ -221,6 +463,7 @@ async function refreshData() {
     const data = await response.json();
     isOffline = false;
     updateDeviceStatus(data);
+    latestLiveData = data;
     const now = Date.now();
     const elapsedHours =
       previousDataTime > 0
@@ -274,6 +517,19 @@ async function refreshData() {
         power
       });
       if (history.length > historyLimit) history.shift();
+    }
+
+    if (reliabilityRunning) {
+      const elapsedSeconds =
+        (Date.now() - reliabilityStartTime) / 1000;
+      recordReliabilitySample(
+        {
+          ...data,
+          oled_ok: statusSnapshot.oled_ok === true
+        },
+        elapsedSeconds
+      );
+      updateReliabilityTimer();
     }
 
     lastSuccessfulUpdate = now;
@@ -331,6 +587,121 @@ function exportChart() {
   }, "image/png");
 }
 
+function exportReliabilityCsv() {
+  if (reliabilityRecords.length === 0) return;
+
+  const rows = [
+    [
+      "interval_minute",
+      "timestamp",
+      "elapsed_seconds",
+      "voltage_v",
+      "current_ma",
+      "power_mw",
+      "bus_voltage_v",
+      "shunt_voltage_mv",
+      "sensor_status",
+      "wifi_status",
+      "oled_status"
+    ]
+  ];
+
+  reliabilityRecords.forEach((record) => {
+    rows.push([
+      record.minute,
+      record.timestamp,
+      record.elapsed_seconds,
+      record.voltage.toFixed(3),
+      record.current.toFixed(3),
+      record.power.toFixed(3),
+      record.bus_voltage.toFixed(3),
+      record.shunt_voltage.toFixed(3),
+      record.sensor_ok ? "OK" : "ERROR",
+      record.wifi_connected ? "CONNECTED" : "DISCONNECTED",
+      record.oled_ok ? "OK" : "ERROR"
+    ]);
+  });
+
+  const csv = rows.map((row) =>
+    row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(",")
+  ).join("\n");
+
+  const url = URL.createObjectURL(
+    new Blob([csv], { type: "text/csv;charset=utf-8" })
+  );
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "plta-db268-10-minute-reliability.csv";
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportCalibrationCsv() {
+  const rows = [
+    [
+      "no",
+      "bukaan_katup",
+      "v_multimeter",
+      "v_ina219",
+      "error_v_percent",
+      "i_multimeter_ma",
+      "i_ina219_ma",
+      "error_i_percent",
+      "p_multimeter_mw",
+      "p_ina219_mw",
+      "error_p_percent",
+      "status"
+    ]
+  ];
+
+  calibrationRecords.forEach((record, index) => {
+    rows.push([
+      index + 1,
+      record.condition,
+      record.multimeterVoltageV === null ? "" : record.multimeterVoltageV.toFixed(3),
+      record.inaVoltageV === null ? "" : record.inaVoltageV.toFixed(3),
+      record.voltageErrorPercent === null ? "" : record.voltageErrorPercent.toFixed(2),
+      record.multimeterCurrentMA === null ? "" : record.multimeterCurrentMA.toFixed(3),
+      record.inaCurrentMA === null ? "" : record.inaCurrentMA.toFixed(3),
+      record.currentErrorPercent === null ? "" : record.currentErrorPercent.toFixed(2),
+      record.multimeterPowerMW === null ? "" : record.multimeterPowerMW.toFixed(3),
+      record.inaPowerMW === null ? "" : record.inaPowerMW.toFixed(3),
+      record.powerErrorPercent === null ? "" : record.powerErrorPercent.toFixed(2),
+      record.status
+    ]);
+  });
+
+  const csv = rows.map((row) =>
+    row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(",")
+  ).join("\n");
+  const url = URL.createObjectURL(
+    new Blob([csv], { type: "text/csv;charset=utf-8" })
+  );
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "plta-db268-ina219-calibration.csv";
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function clearCalibration() {
+  calibrationRecords.forEach((record, index) => {
+    record.multimeterVoltageV = null;
+    record.multimeterCurrentMA = null;
+    record.inaVoltageV = null;
+    record.inaCurrentMA = null;
+    record.inaPowerMW = null;
+    record.multimeterPowerMW = null;
+    record.voltageErrorPercent = null;
+    record.currentErrorPercent = null;
+    record.powerErrorPercent = null;
+    record.status = "Belum diuji";
+    $("calV" + index).value = "";
+    $("calI" + index).value = "";
+  });
+  renderCalibration();
+}
+
 async function calibrateZero() {
   const button = $("calibrateButton");
   button.disabled = true;
@@ -380,12 +751,25 @@ async function restartEsp32() {
 
 $("refreshRate").addEventListener("change", (event) => {
   refreshInterval = Number(event.target.value);
+  const selected = event.target.options[event.target.selectedIndex].text;
+  const footer = document.querySelector("footer span:last-child");
+  if (footer) footer.textContent = "Refresh: " + selected;
   startRefresh();
 });
 $("exportCsv").addEventListener("click", exportCsv);
 $("exportChart").addEventListener("click", exportChart);
 $("calibrateButton").addEventListener("click", calibrateZero);
 $("restartButton").addEventListener("click", restartEsp32);
+$("startReliability").addEventListener("click", startReliabilityTest);
+$("stopReliability").addEventListener("click", stopReliabilityTest);
+$("exportReliability").addEventListener("click", exportReliabilityCsv);
+$("clearCalibration").addEventListener("click", clearCalibration);
+$("exportCalibration").addEventListener("click", exportCalibrationCsv);
+document.querySelectorAll(".save-calibration").forEach((button) => {
+  button.addEventListener("click", () => {
+    saveCalibration(Number(button.dataset.index));
+  });
+});
 $("clearHistory").addEventListener("click", () => {
   history.splice(0, history.length);
   sessionEnergyMWh = 0;
@@ -412,10 +796,12 @@ setInterval(() => {
       Date.now() - lastSuccessfulUpdate > refreshInterval * 3) {
     setOffline();
   }
+  if (reliabilityRunning) updateReliabilityTimer();
 }, 1000);
 
 refreshStatus();
 setInterval(refreshStatus, 5000);
+renderCalibration();
 refreshData();
 startRefresh();
 )rawliteral";

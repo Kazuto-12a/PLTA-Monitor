@@ -11,11 +11,12 @@
 #include <ArduinoJson.h>
 #include <Adafruit_NeoPixel.h>
 #include "web_assets_gz.h"
+#include "oled_display.h"
 
 #define OLED_I2C_SDA_PIN 8
 #define OLED_I2C_SCL_PIN 9
-#define INA219_I2C_SDA_PIN 16
-#define INA219_I2C_SCL_PIN 17
+#define INA219_I2C_SDA_PIN OLED_I2C_SDA_PIN
+#define INA219_I2C_SCL_PIN OLED_I2C_SCL_PIN
 
 #define OLED_WIDTH 128
 #define OLED_HEIGHT 128
@@ -36,8 +37,8 @@
 #define ALARM_LOW_POWER_MW 50.0f
 
 static const uint32_t I2C_CLOCK_HZ = 100000;
-static const uint32_t SENSOR_INTERVAL_MS = 500;
-static const uint32_t OLED_INTERVAL_MS = 1000;
+static const uint32_t SENSOR_INTERVAL_MS = 100;
+static const uint32_t OLED_INTERVAL_MS = 250;
 static const uint32_t SERIAL_INTERVAL_MS = 2000;
 static const uint32_t WIFI_RECONNECT_INTERVAL_MS = 5000;
 static const uint32_t RGB_UPDATE_INTERVAL_MS = 500;
@@ -112,6 +113,9 @@ void scanI2cBus() {
       if (address == OLED_DEFAULT_ADDRESS || address == 0x3D) {
         Serial.print(" OLED");
       }
+      if (address == INA219_DEFAULT_ADDRESS) {
+        Serial.print(" INA219");
+      }
 
       Serial.println();
       count++;
@@ -131,8 +135,8 @@ void scanI2cBus() {
 }
 
 bool ina219AddressFound() {
-  Wire1.beginTransmission(INA219_DEFAULT_ADDRESS);
-  return Wire1.endTransmission() == 0;
+  Wire.beginTransmission(INA219_DEFAULT_ADDRESS);
+  return Wire.endTransmission() == 0;
 }
 
 void calibrateZeroOffsets() {
@@ -185,30 +189,6 @@ void calibrateZeroOffsets() {
     currentZeroOffset_mA,
     validSamples
   );
-}
-
-void scanIna219Bus() {
-  Serial.println("INA219 I2C scan:");
-  bool found = false;
-
-  for (uint8_t address = 1; address < 127; address++) {
-    Wire1.beginTransmission(address);
-    if (Wire1.endTransmission() == 0) {
-      Serial.printf("  0x%02X", address);
-      if (address == INA219_DEFAULT_ADDRESS) {
-        Serial.print(" INA219");
-        found = true;
-      }
-      Serial.println();
-    }
-  }
-
-  if (!found) {
-    Serial.printf(
-      "  INA219 address 0x%02X not found.\n",
-      INA219_DEFAULT_ADDRESS
-    );
-  }
 }
 
 bool measurementsAreValid(float busV, float shuntMV, float currentMA) {
@@ -465,78 +445,24 @@ void drawStartupScreen(const char *statusLine) {
   if (!oledOk) {
     return;
   }
-
-  display.clearDisplay();
-  display.setTextColor(SH110X_WHITE);
-  display.setTextSize(2);
-  display.setCursor(12, 8);
-  display.print("PLTA");
-  display.setCursor(12, 34);
-  display.print("MONITOR");
-  display.setTextSize(1);
-  display.setCursor(12, 66);
-  display.print(statusLine);
-  display.display();
+  PltaOled::drawStartup(display, statusLine);
 }
 
 void drawOledStatus() {
   if (!oledOk) {
     return;
   }
-
-  display.clearDisplay();
-  display.setTextColor(SH110X_WHITE);
-
-  display.setTextSize(1);
-  display.setCursor(24, 8);
-  display.print("PLTA MONITOR");
-
-  display.drawFastHLine(0, 24, OLED_WIDTH, SH110X_WHITE);
-
-  display.setTextSize(1);
-  display.setCursor(0, 30);
-  if (sensorOk) {
-    display.print("GENERATOR STATUS: OK");
-  } else if (ina219Ok) {
-    display.print("GENERATOR STATUS: INVALID");
-  } else {
-    display.print("SENSOR ERROR");
-  }
-
-  display.setCursor(0, 43);
-  display.print("VOLTAGE");
-  display.setTextSize(2);
-  display.setCursor(0, 54);
-  if (sensorOk) {
-    display.print(generatorVoltage_V, 2);
-    display.print(" V");
-  } else {
-    display.print("--.- V");
-  }
-
-  display.setTextSize(1);
-  display.setCursor(0, 78);
-  display.print("CURRENT");
-  display.setTextSize(2);
-  display.setCursor(0, 89);
-  if (sensorOk) {
-    display.print(current_mA, 1);
-    display.print(" mA");
-  } else {
-    display.print("--- mA");
-  }
-
-  display.setTextSize(1);
-  display.setCursor(0, 113);
-  if (sensorOk) {
-    display.print("P:");
-    display.print(generatorPower_mW, 0);
-    display.print(" mW");
-  } else {
-    display.print("P: --- mW");
-  }
-
-  display.display();
+  PltaOled::drawLive(
+    display,
+    generatorVoltage_V,
+    current_mA,
+    generatorPower_mW,
+    sensorOk,
+    ina219Ok,
+    oledOk,
+    WiFi.getMode() == WIFI_AP || WiFi.getMode() == WIFI_AP_STA,
+    millis()
+  );
 }
 
 void setup() {
@@ -552,18 +478,15 @@ void setup() {
     OLED_I2C_SCL_PIN
   );
   Serial.printf(
-    "INA219 I2C: SDA GPIO%d, SCL GPIO%d\n",
+    "INA219 I2C: SDA GPIO%d, SCL GPIO%d (shared)\n",
     INA219_I2C_SDA_PIN,
     INA219_I2C_SCL_PIN
   );
 
   Wire.begin(OLED_I2C_SDA_PIN, OLED_I2C_SCL_PIN);
   Wire.setClock(I2C_CLOCK_HZ);
-  Wire1.begin(INA219_I2C_SDA_PIN, INA219_I2C_SCL_PIN);
-  Wire1.setClock(I2C_CLOCK_HZ);
 
   scanI2cBus();
-  scanIna219Bus();
 
   if (oledAddress != 0) {
     Serial.printf("Initializing OLED at 0x%02X\n", oledAddress);
@@ -582,7 +505,7 @@ void setup() {
   if (!ina219AddressFound()) {
     Serial.printf("INA219: not detected at 0x%02X\n", INA219_DEFAULT_ADDRESS);
   } else {
-    ina219Ok = ina219.begin(&Wire1);
+    ina219Ok = ina219.begin(&Wire);
     if (!ina219Ok) {
       Serial.println("INA219: detected but initialization failed");
     } else {

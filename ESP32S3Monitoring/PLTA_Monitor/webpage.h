@@ -20,7 +20,9 @@ const char index_html[] PROGMEM = R"rawliteral(
       <div class="top-actions">
         <label class="refresh-select">Refresh
           <select id="refreshRate">
-            <option value="1000" selected>1 s</option>
+            <option value="250" selected>250 ms</option>
+            <option value="500">500 ms</option>
+            <option value="1000">1 s</option>
             <option value="2000">2 s</option>
             <option value="5000">5 s</option>
           </select>
@@ -146,9 +148,99 @@ const char index_html[] PROGMEM = R"rawliteral(
       </div>
     </section>
 
+    <section class="panel reliability-panel">
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">TABLE TR.2 - ITEM 7</p>
+          <h2>Reliability Test 10 Minutes</h2>
+        </div>
+        <strong id="reliabilityState" class="reliability-state">Ready</strong>
+      </div>
+      <div class="reliability-controls">
+        <button id="startReliability" type="button" class="action-button">Start 10-Minute Test</button>
+        <button id="stopReliability" type="button" class="action-button secondary" disabled>Stop Test</button>
+        <button id="exportReliability" type="button" class="action-button" disabled>Export CSV</button>
+      </div>
+      <div class="reliability-progress">
+        <div>
+          <span>Elapsed</span>
+          <strong id="reliabilityElapsed">00:00</strong>
+        </div>
+        <div>
+          <span>Next record</span>
+          <strong id="reliabilityNext">02:00</strong>
+        </div>
+        <div>
+          <span>Recorded</span>
+          <strong id="reliabilityCount">0 / 5</strong>
+        </div>
+      </div>
+      <div class="reliability-table-wrap">
+        <table class="reliability-table">
+          <thead>
+            <tr>
+              <th>Interval</th>
+              <th>Voltage</th>
+              <th>Current</th>
+              <th>Power</th>
+              <th>Sensor</th>
+              <th>Wi-Fi</th>
+              <th>OLED</th>
+            </tr>
+          </thead>
+          <tbody id="reliabilityRows">
+            <tr><td colspan="7" class="empty-row">No test records</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel calibration-panel">
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">TABLE TR.2 - ITEM 4</p>
+          <h2>Kalibrasi Komparatif INA219</h2>
+        </div>
+        <strong id="calibrationSummary" class="reliability-state">Belum diuji</strong>
+      </div>
+      <p class="calibration-note">
+        Catat tegangan dan arus dari multimeter untuk setiap bukaan katup, kemudian simpan hasil INA219 saat itu.
+      </p>
+      <div class="calibration-grid">
+        <article class="calibration-row" data-index="0">
+          <h3>1. Bukaan Rendah</h3>
+          <label>Tegangan multimeter (V)<input id="calV0" type="number" step="0.001" inputmode="decimal"></label>
+          <label>Arus multimeter (mA)<input id="calI0" type="number" step="0.1" inputmode="decimal"></label>
+          <div class="calibration-values"><span>INA: <b id="calIna0">-- V / -- mA</b></span><span>Error V: <b id="calErrV0">--</b></span></div>
+          <div class="calibration-values"><span>Error I: <b id="calErrI0">--</b></span><span>Error P: <b id="calErrP0">--</b></span></div>
+          <button type="button" class="action-button save-calibration" data-index="0">Simpan Pengujian</button>
+        </article>
+        <article class="calibration-row" data-index="1">
+          <h3>2. Bukaan Sedang</h3>
+          <label>Tegangan multimeter (V)<input id="calV1" type="number" step="0.001" inputmode="decimal"></label>
+          <label>Arus multimeter (mA)<input id="calI1" type="number" step="0.1" inputmode="decimal"></label>
+          <div class="calibration-values"><span>INA: <b id="calIna1">-- V / -- mA</b></span><span>Error V: <b id="calErrV1">--</b></span></div>
+          <div class="calibration-values"><span>Error I: <b id="calErrI1">--</b></span><span>Error P: <b id="calErrP1">--</b></span></div>
+          <button type="button" class="action-button save-calibration" data-index="1">Simpan Pengujian</button>
+        </article>
+        <article class="calibration-row" data-index="2">
+          <h3>3. Bukaan Penuh</h3>
+          <label>Tegangan multimeter (V)<input id="calV2" type="number" step="0.001" inputmode="decimal"></label>
+          <label>Arus multimeter (mA)<input id="calI2" type="number" step="0.1" inputmode="decimal"></label>
+          <div class="calibration-values"><span>INA: <b id="calIna2">-- V / -- mA</b></span><span>Error V: <b id="calErrV2">--</b></span></div>
+          <div class="calibration-values"><span>Error I: <b id="calErrI2">--</b></span><span>Error P: <b id="calErrP2">--</b></span></div>
+          <button type="button" class="action-button save-calibration" data-index="2">Simpan Pengujian</button>
+        </article>
+      </div>
+      <div class="calibration-actions">
+        <button id="clearCalibration" type="button" class="action-button secondary">Hapus Hasil</button>
+        <button id="exportCalibration" type="button" class="action-button">Export CSV Kalibrasi</button>
+      </div>
+    </section>
+
     <footer>
       <span id="lastUpdate">Waiting for data</span>
-      <span>Refresh: 1 s</span>
+      <span>Refresh: 250 ms</span>
     </footer>
   </main>
   <script src="/app.js?v=20261121" defer></script>
